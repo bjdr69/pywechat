@@ -7,10 +7,11 @@ import soundfile as sf
 import sounddevice as sd
 from packaging import version
 from pywinauto import WindowSpecification,Desktop,mouse
+from pywinauto.controls.uia_controls import ListItemWrapper,ListViewWrapper
 from .Config import GlobalConfig
 from .WeChatTools import Navigator,Tools
 from .WinSettings import SystemSettings
-from .Uielements import Main_window,SideBar,Buttons,Edits,Lists,Windows,Texts
+from .Uielements import Main_window,SideBar,Buttons,Edits,Lists,Windows,Texts,MenuItems
 #######################################################################################
 pyautogui.FAILSAFE=False#防止鼠标在屏幕边缘处造成的误触
 desktop=Desktop(backend='uia')#windows桌面WindowSpecification示例
@@ -111,6 +112,7 @@ class Special_Label():
             self.VoiceCall='语音聊天'
             self.VideoCall='视频聊天'
             self.Download='下载'
+            self.RedPacket='微信红包'
             self.NotCare={'session_item_服务号','session_item_公众号'}
             self.Minutes={f'{i}分钟前' for i in range(1,60)}
             self.Hours={f'{i}小时前' for i in range(1,24)}
@@ -159,6 +161,7 @@ class Special_Label():
             self.VoiceCall='Voice Call'
             self.VideoCall='Video Call'
             self.Download='Download'
+            self.RedPacket='Weixin Red Packet'
             self.NotCare={'session_item_Service Accounts','session_item_Official Accounts'}
             self.Minutes={f'{i} minute(s) ago' for i in range(1,60)}
             self.Hours={f'{i} hour(s) ago' for i in range(1,24)}
@@ -197,12 +200,13 @@ class Special_Label():
             self.YearSep='年'
             self.MonthSep='月'
             self.DaysAgo='天前'
-            self.NotDownloaded='未下载'
-            self.Expired='已过期'
+            self.NotDownloaded='未下載'
+            self.Expired='已逾期'
             self.SendInterrupt='发送中断'
             self.Yesterday='昨天'
             self.Moments='朋友圈'
             self.Download='下載'
+            self.RedPacket='微信紅包'
             self.NotCare={'session_item_服務賬號','session_item_官方賬號'}
             self.Minutes={f'{i}分鐘前' for i in range(1,60)}
             self.Hours={f'{i}小時前' for i in range(1,24)}
@@ -397,62 +401,7 @@ class TimeStamp():
             month_label=re.sub(r'年0','年',month_label)
         return month_label
 
-def At(main_window:WindowSpecification,at_members:list[str]):
-    '''
-    在群里@指定的好友,可用于自定义的消息发送函数中
-    Args:
-        main_window:微信主界面
-        at_members:群内所有at对象,必须是群昵称
-    '''
-    def select(mention_popover:WindowSpecification,member:str):
-        '''
-        微信的@机制必须type_keys打字才可以唤醒,并且是模糊文字匹配(只匹配文字,空格表情都不匹配)
-        若好友的名字中有空格和表情,那么打字的内容只能是第一个空格之前的所有非空格文字,但凡多一个空格
-        就不会唤醒@,同时由于表情不好打字,所以替换掉,出现mention面板然后在弹出的列表里完整匹配
-        '''
-        is_find=True
-        mention_list=mention_popover.child_window(control_type='List',title='')
-        first_item=mention_list.children()[0].window_text()#弹出列表后的第一个人
-        selected_listitem=[listitem for listitem in mention_list.children() if listitem.is_selected()][0]
-        while selected_listitem.window_text()!=member:#一直按着下键找，找到了结束循环，或者遍历完一圈又回到了起点也结束循环(即选中的对象与第一个人名字相同)
-            mention_list.type_keys('{DOWN}')
-            selected_listitem=[listitem for listitem in mention_list.children() if listitem.is_selected()][0]
-            if selected_listitem.window_text()==first_item:
-                is_find=False
-                break
-        return is_find
-        
-    if Tools.is_group_chat(main_window):
-        edit_area=main_window.child_window(**Edits.CurrentChatEdit)
-        mention_popover=main_window.child_window(**Windows.MentionPopOverWindow)
-        for member in at_members:
-            cleaned_member=emoji.replace_emoji(member,'')#去掉emoji
-            cleaned_member=cleaned_member.split(' ')[0]#找到第一个空格字段之前内容
-            edit_area.type_keys(f'@{cleaned_member}')
-            if mention_popover.exists(timeout=0.1):
-                is_find=select(mention_popover,member)
-                if is_find:
-                    edit_area.type_keys('{ENTER}')
-                if not is_find:
-                    pyautogui.press('backspace',presses=len(cleaned_member)+1)
-            else:
-                edit_area.set_text('')
-
-def At_all(main_window:WindowSpecification):
-    '''在群里@所有人'''
-    if Tools.is_group_chat(main_window):
-        edit_area=main_window.child_window(**Edits.CurrentChatEdit)
-        mention_popover=main_window.child_window(**Windows.MentionPopOverWindow)
-        edit_area.type_keys(f'@')
-        if mention_popover.exists(timeout=0.1):
-            mention_list=mention_popover.child_window(control_type='List',title='')
-            first_item=mention_list.children()[0].window_text()#弹出列表后的第一个人
-            if first_item!='所有人':
-                pyautogui.press('backspace',presses=1)
-                print(f'你不是该群群主或管理员,无权@所有人')
-            else:
-                edit_area.type_keys('{ENTER}')
-class ContentSender():
+class Messages():
     '''发送消息的一些操作,传入的参数是main_window(微信),且不涉及关闭微信窗口,便于个人二次开发'''
     @staticmethod
     def send_messages_to_friend(main_window:WindowSpecification,messages:list[str],send_delay:float=None):
@@ -528,7 +477,7 @@ class ContentSender():
         该方法用于给当前聊天界面内的好友或群聊发送语音
         Args:
             friend:好友或群聊备注。格式:friend="好友或群聊备注"
-            audios:所有待发送消息列表。格式:message=["消息1","消息2"]
+            audios:所有待发送消息列表。格式:audios=["xxx.wav","yyy.mp3"...]
             audio_length:语音长度,按照微信语音
             send_delay:发送单条信息的延迟,单位:秒/s,默认0.2s。
         '''
@@ -593,6 +542,65 @@ class ContentSender():
                 mouse.click(coords=position)
                 solitaire_window.child_window(control_type='Edit',found_index=2).set_text(description)
             solitaire_button.click_input()
+
+
+
+def At(main_window:WindowSpecification,at_members:list[str]):
+    '''
+    在群里@指定的好友,可用于自定义的消息发送函数中
+    Args:
+        main_window:微信主界面
+        at_members:群内所有at对象,必须是群昵称
+    '''
+    def select(mention_popover:WindowSpecification,member:str):
+        '''
+        微信的@机制必须type_keys打字才可以唤醒,并且是模糊文字匹配(只匹配文字,空格表情都不匹配)
+        若好友的名字中有空格和表情,那么打字的内容只能是第一个空格之前的所有非空格文字,但凡多一个空格
+        就不会唤醒@,同时由于表情不好打字,所以替换掉,出现mention面板然后在弹出的列表里完整匹配
+        '''
+        is_find=True
+        mention_list=mention_popover.child_window(control_type='List',title='')
+        first_item=mention_list.children()[0].window_text()#弹出列表后的第一个人
+        selected_listitem=[listitem for listitem in mention_list.children() if listitem.is_selected()][0]
+        while selected_listitem.window_text()!=member:#一直按着下键找，找到了结束循环，或者遍历完一圈又回到了起点也结束循环(即选中的对象与第一个人名字相同)
+            mention_list.type_keys('{DOWN}')
+            selected_listitem=[listitem for listitem in mention_list.children() if listitem.is_selected()][0]
+            if selected_listitem.window_text()==first_item:
+                is_find=False
+                break
+        return is_find
+        
+    if Tools.is_group_chat(main_window):
+        edit_area=main_window.child_window(**Edits.CurrentChatEdit)
+        mention_popover=main_window.child_window(**Windows.MentionPopOverWindow)
+        for member in at_members:
+            cleaned_member=emoji.replace_emoji(member,'')#去掉emoji
+            cleaned_member=cleaned_member.split(' ')[0]#找到第一个空格字段之前内容
+            edit_area.type_keys(f'@{cleaned_member}',pause=0.1)
+            if mention_popover.exists(timeout=0.1):
+                is_find=select(mention_popover,member)
+                if is_find:
+                    edit_area.type_keys('{ENTER}')
+                if not is_find:
+                    pyautogui.press('backspace',presses=len(cleaned_member)+1)
+            else:
+                edit_area.set_text('')
+
+def At_all(main_window:WindowSpecification):
+    '''在群里@所有人'''
+    if Tools.is_group_chat(main_window):
+        edit_area=main_window.child_window(**Edits.CurrentChatEdit)
+        mention_popover=main_window.child_window(**Windows.MentionPopOverWindow)
+        edit_area.type_keys(f'@',pause=0.1)
+        if mention_popover.exists(timeout=0.1):
+            mention_list=mention_popover.child_window(control_type='List',title='')
+            first_item=mention_list.children()[0].window_text()#弹出列表后的第一个人
+            if first_item!='所有人':
+                pyautogui.press('backspace',presses=1)
+                print(f'你不是该群群主或管理员,无权@所有人')
+            else:
+                edit_area.type_keys('{ENTER}')
+
 def get_new_message_num(main_window:WindowSpecification=None,is_maximize:bool=None,close_weixin:bool=None):
     '''
     该函数用来获取侧边栏左侧微信按钮上的红色新消息总数
@@ -614,10 +622,28 @@ def get_new_message_num(main_window:WindowSpecification=None,is_maximize:bool=No
     #只能通过id来获取,id是30159，之前是30007,可能是qt组件映射关系不一样
     full_desc=weixin_button.element_info.element.GetCurrentPropertyValue(30159)
     new_message_num=re.search(r'\d+',full_desc)#正则提取数量
-    if close_weixin:
-        main_window.close()
+    if close_weixin:main_window.close()
     return int(new_message_num.group(0)) if new_message_num  else 0
 
+
+def NativeChooseFolder(folder:str):
+    '''
+    该函数用来在微信点击保存按钮后弹出的windows界面中保存文件
+    '''
+    SystemSettings.copy_text_to_clipboard(folder)
+    choose_folder_window=desktop.window(**{'control_type':'Window','framework_id':'Win32','top_level_only':False,'found_index':0})
+    choose_folder_button=choose_folder_window.child_window(control_type='Button',title='选择文件夹')
+    prograss_bar=choose_folder_window.child_window(control_type='ProgressBar',class_name='msctls_progress32',framework_id='Win32')
+    path_bar=prograss_bar.child_window(class_name='ToolbarWindow32',control_type='ToolBar',found_index=0)
+    if re.search(r':\s*(.*)',path_bar.window_text()).group(1)!=folder:
+        rec=path_bar.rectangle()
+        mouse.click(coords=(rec.right-5,int(rec.top+rec.bottom)//2))
+        pyautogui.press('backspace')
+        pyautogui.hotkey('ctrl','v',_pause=False)
+        pyautogui.press('enter')
+        time.sleep(0.5)
+    choose_folder_button.click_input()
+    
 def scan_for_new_messages(main_window:WindowSpecification=None,delay:float=0.3,is_maximize:bool=None,close_weixin:bool=None)->dict:
     '''
     该函数用来扫描检查一遍会话列表中的所有新消息,返回发送对象以及新消息数量(不包括免打扰)
@@ -685,6 +711,194 @@ def scan_for_new_messages(main_window:WindowSpecification=None,delay:float=0.3,i
     if close_weixin:
         main_window.close()
     return newMessages_dict
+
+def parse_chat_history(friend:str,myName:str,texts_with_name:list[str])->tuple[list,list,list]:
+    '''私聊聊天记录消息解析,不是对方发送就是个人发送
+    Args:
+        friend:好友名称
+        myName:本人昵称(Contacts.check_my_info)
+        texts_with_name:开启多选遍历得到的文本(traverse_chat_histor_list)
+    Returns:
+        (contents,senders,timestamps):消息内容,消息发送人,时间戳
+    '''
+    senders=[]
+    contents=[]
+    timestamps=[]
+    timestamp_pattern=Regex_Patterns.Chathistory_Timestamp_pattern
+    for text in texts_with_name:
+        timestamp=timestamp_pattern.search(text).group(0) if timestamp_pattern.search(text) else '红包或转账(无法获取时间戳)'
+        text=timestamp_pattern.sub('',text)
+        if timestamp=='红包或转账(无法获取时间戳)':
+            sender='红包或转账(无法获取发送人)'
+            content=text
+        else:
+            sender=friend if re.search(rf'^{friend}\s',text) is not None else myName
+            content=re.sub(rf'^{sender}\s','',text)
+        senders.append(sender)
+        contents.append(content)
+        timestamps.append(timestamp)
+    return contents,senders,timestamps
+
+def parse_group_chat_history(texts_with_name:list[str],texts_without_name:list[str],groupMembers:list[str])->tuple[list,list,list]:
+    '''群聊内的聊天记录解析
+    Args:
+        texts_with_name:开启多选遍历得到的文本(traverse_chat_history_list)
+        texts_without_name:不开启多选遍历得到的文本(traverse_chat_history_list)
+        groupMembers:群成员昵称列表(Contacts.get_groupMembers_info)
+    Returns:
+        (contents,senders,timestamps):消息内容,消息发送人,时间戳
+    '''
+    senders=[]
+    contents=[]
+    timestamps=[]
+    timestamp_pattern=Regex_Patterns.Chathistory_Timestamp_pattern
+    if groupMembers:
+        for text in texts_with_name:
+            timestamp=timestamp_pattern.search(text).group(0) if timestamp_pattern.search(text) else '红包或转账(无法获取时间戳)'
+            if timestamp=='红包或转账(无法获取时间戳)':
+                sender='红包或转账(无法获取发送人)'
+            else:
+                for groupMember in groupMembers:
+                    search_result=re.search(rf'^({re.escape(groupMember)})\s',text)
+                    if search_result is not None:
+                        sender=search_result.group(1)
+                        content=timestamp_pattern.sub('',text).replace(sender,'')
+            senders.append(sender)
+            contents.append(content)
+            timestamps.append(timestamp)
+    else:
+        for text_with_name,text_without_name in zip(texts_with_name,texts_without_name):
+            timestamp=timestamp_pattern.search(text_without_name).group(0) if timestamp_pattern.search(text_without_name) else '红包或转账(无法获取时间戳)'
+            content=timestamp_pattern.sub('',text_without_name)
+            if timestamp=='红包或转账(无法获取时间戳)':
+                sender='红包或转账(无法获取发送人)'
+            else:
+                sender=text_with_name.replace(text_without_name,'').strip()
+                sender=timestamp_pattern.sub('',sender).replace(content,'')
+            senders.append(sender)
+            contents.append(content)
+            timestamps.append(timestamp)
+    return contents,senders,timestamps
+
+def parse_messages(friend:str,myName:str,texts_with_name:list[str]):
+    '''私聊解析聊天界面内的信息,不是自己发的就是对方发的
+    Args:
+        friend:好友名称
+        myName:本人昵称(Contacts.check_my_info)
+        texts_with_name:开启多选遍历得到的文本(traverse_chatList)
+    Returns:
+        (contents,senders,timestamps):消息内容,消息发送人,时间戳
+    '''
+    senders=[]
+    contents=[]
+    for text in texts_with_name:
+        sender=friend if re.search(rf'^{re.escape(friend)}\s',text) is not None else myName
+        content=re.sub(rf'^{sender}\s','',text)
+        senders.append(sender)
+        contents.append(content)
+    return contents,senders
+
+def parse_group_messages(texts_with_name:list[str],texts_without_name:list[str]):
+    '''群聊提取信息
+    Args:
+        texts_with_name:开启多选遍历得到的文本(traverse_chatList)
+        texts_without_name:不开启多选遍历得到的文本(traverse_chatList)
+    Returns:
+        (contents,senders):消息内容,消息发送人,时间戳
+    '''
+    senders=[]
+    contents=[]
+    for text_with_name,text_without_name in zip(texts_with_name,texts_without_name):
+        sender=text_with_name.replace(text_without_name,'').strip()
+        if sender=='':sender='红包或转账(无法获取发送人)'
+        senders.append(sender)
+        contents.append(text_without_name)
+    return contents,senders
+
+def traverse_chat_history_list(chat_history_window:WindowSpecification,select:bool,number:int,save_detail:bool=False,target_folder:str=None):
+    '''该函数用于遍历聊天记录列表获取指定数量文本,并在选中状态下保存图片视频与文件
+    Args:
+        chat_history_window:聊天记录窗口
+        select:是否在选中的状态下遍历
+        save_detail:是否保存图片、视频、文件
+        target_folder:保存图片、视频、文件的文件夹
+        number:指定数量条聊天记录
+    Returns:
+        texts:指定数量的聊天记录文本
+    '''
+    file_count=0
+    media_count=0
+    recorded_num=0
+    texts=[]
+    runtime_ids=[]
+    image_label=Special_Labels.Image
+    video_label=Special_Labels.Video
+    file_label=Special_Labels.File
+    control_type='CheckBox' if select else 'ListItem'
+    chat_history_list=chat_history_window.child_window(**Lists.ChatHistoryList)
+    if select:
+        latest_message=Tools.select_chat_history_list(chat_history_window)
+        if latest_message is None:raise ValueError(f'该聊天只有系统消息,无法在聊天记录界面中选中任何消息!')
+    while recorded_num<number:
+        selected=[item for item in chat_history_list.children(control_type=control_type) if item.has_keyboard_focus()]
+        if selected and selected[0].class_name()!='mmui::ChatItemView':
+            runtime_ids.append(selected[0].element_info.runtime_id)
+            #同一个runtime_id挨着重复出现就说明到底部了无法继续下滑
+            if len(runtime_ids)>2 and runtime_ids[-1]==runtime_ids[-2]:
+                break
+            if selected[0].class_name()=='mmui::ChatBubbleReferItemView' and select and save_detail:
+                if video_label in selected[0].window_text() or image_label in selected[0].window_text():
+                    pyautogui.press('enter')
+                    media_count+=1
+                if file_label in selected[0].window_text():
+                    pyautogui.press('enter')
+                    file_count+=1
+            texts.append(selected[0].window_text())
+            recorded_num+=1
+        pyautogui.press('down',presses=1,_pause=False)
+    savable_item_count=file_count+media_count
+    if select and save_detail and savable_item_count!=0 and target_folder is not None:
+        save_button=chat_history_window.child_window(**Buttons.SaveButton)
+        save_button.click_input()
+        NativeChooseFolder(target_folder)
+    if select and savable_item_count==0:pyautogui.press('esc')
+    chat_history_list.type_keys('{HOME}')
+    return texts
+
+def traverse_chatList(main_window:WindowSpecification,select:bool,number:int):
+    '''该函数用于遍历聊天窗口内的消息列表获取指定数量文本
+    Args:
+        main_window:微信主界面窗口
+        select:是否在选中的状态下遍历
+        number:指定数量条聊天记录
+    Returns:
+        texts:指定数量的聊天记录文本
+    '''
+    texts=[]
+    runtime_ids=[]
+    recorded_num=0
+    control_type='CheckBox' if select else 'ListItem'
+    chatList=main_window.child_window(**Lists.FriendChatList)
+    if select:
+        last_item=Tools.select_chatList(main_window)
+        if last_item is None:
+            raise ValueError(f'该聊天只有系统消息,无法在聊天界面中选中任何消息!')
+        if last_item is not None:
+            texts.append(last_item.window_text())
+            recorded_num+=1
+    while recorded_num<number:
+        selected=[item for item in chatList.children(control_type=control_type) if item.has_keyboard_focus()]
+        if selected and selected[0].class_name()!='mmui::ChatItemView':
+            runtime_ids.append(selected[0].element_info.runtime_id)
+            #同一个runtime_id挨着重复出现就说明到底部了无法继续下滑
+            if len(runtime_ids)>2 and runtime_ids[-1]==runtime_ids[-2]:
+                break
+            texts.append(selected[0].window_text())
+            recorded_num+=1
+        pyautogui.press('up',presses=1,_pause=False)
+    if select:pyautogui.press('esc')
+    chatList.type_keys('{END}')
+    return texts
 
 def process_audios(audios:list[str],audio_length:int=60):
     '''
