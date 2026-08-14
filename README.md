@@ -15,7 +15,7 @@ pywechat是一个基于pywinauto实现的Windows系统下PC微信自动化(pure 
 > 3. **python版本**:3.10+(支持TypeHint)
 > 4. **支持语言**:简体中文,English,繁體中文
 
-### UI可见性方法
+### UI可见性相关问题
 
 - 1.使用UI树可见的账号进行rpa
 - 2.使用一些其他方法进行rpa比如OCR
